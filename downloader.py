@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 
+import hashlib
 import json
 import os
 import re
 import sqlite3
+import subprocess
 from datetime import datetime
 
 import feedparser
 import requests
-
 
 BASE_DIR = os.path.expanduser("~/npr")
 CONFIG_FILE = os.path.join(BASE_DIR, "config.json")
@@ -22,7 +23,6 @@ def load_config():
 
 def init_database():
     conn = sqlite3.connect(DB_FILE)
-
     conn.execute("""
         CREATE TABLE IF NOT EXISTS episodes (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -36,11 +36,17 @@ def init_database():
             downloaded INTEGER DEFAULT 0,
             played INTEGER DEFAULT 0,
             position REAL DEFAULT 0,
+            duration REAL,
             added_at TEXT NOT NULL
         )
     """)
 
-    conn.commit()
+    # Upgrade databases created by older versions without losing existing data.
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(episodes)")}
+    if "duration" not in columns:
+        conn.execute("ALTER TABLE episodes ADD COLUMN duration REAL")
+        conn.commit()
+
     return conn
 
 
@@ -50,9 +56,36 @@ def safe_filename(text):
     return text.strip()[:180]
 
 
+def make_filename(title, guid):
+    """Make a readable filename with a stable suffix to avoid title collisions."""
+    base = safe_filename(title) or "Untitled episode"
+    suffix = hashlib.sha1(str(guid).encode("utf-8")).hexdigest()[:8]
+    return f"{base[:170].rstrip()} [{suffix}].mp3"
+
+
+def get_audio_duration(filename):
+    """Return duration in seconds, or None if ffprobe cannot read it."""
+    try:
+        result = subprocess.run(
+            [
+                "ffprobe",
+                "-v", "error",
+                "-show_entries", "format=duration",
+                "-of", "default=noprint_wrappers=1:nokey=1",
+                filename,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=True,
+        )
+        return float(result.stdout.strip())
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return None
+
+
 def download_episode(url, filename, timeout):
     temp_filename = filename + ".part"
-
     print("      Downloading...")
 
     try:
@@ -60,11 +93,9 @@ def download_episode(url, filename, timeout):
             url,
             stream=True,
             timeout=timeout,
-            headers={"User-Agent": "NPR-Pi/1.0"}
+            headers={"User-Agent": "NPR-Pi/1.0"},
         ) as response:
-
             response.raise_for_status()
-
             total = int(response.headers.get("content-length", 0))
             downloaded = 0
             last_percent = -1
@@ -77,14 +108,13 @@ def download_episode(url, filename, timeout):
 
                         if total:
                             percent = int(downloaded * 100 / total)
-
                             if percent != last_percent:
                                 print(
                                     f"\r      Progress: {percent}% "
                                     f"({downloaded // 1048576} / "
                                     f"{total // 1048576} MB)",
                                     end="",
-                                    flush=True
+                                    flush=True,
                                 )
                                 last_percent = percent
 
@@ -96,11 +126,23 @@ def download_episode(url, filename, timeout):
 
     except Exception as e:
         print(f"\n      ERROR: {e}")
-
         if os.path.exists(temp_filename):
-            os.remove(temp_filename)
-
+            try:
+                os.remove(temp_filename)
+            except OSError:
+                pass
         return False
+
+
+def fetch_feed(feed_url, timeout):
+    """Fetch an RSS feed with an explicit timeout, then parse it."""
+    response = requests.get(
+        feed_url,
+        timeout=timeout,
+        headers={"User-Agent": "NPR-Pi/1.0"},
+    )
+    response.raise_for_status()
+    return feedparser.parse(response.content)
 
 
 def update_show(conn, show_id, show, settings):
@@ -110,20 +152,23 @@ def update_show(conn, show_id, show, settings):
     print("=" * 60)
     print("      Checking feed...")
 
-    feed = feedparser.parse(show["feed"])
+    try:
+        feed = fetch_feed(
+            show["feed"],
+            settings.get("download_timeout", 300),
+        )
+    except requests.RequestException as e:
+        print(f"      ERROR: Could not fetch feed: {e}")
+        return
 
     if not feed.entries:
         print("      ERROR: No episodes found.")
         return
 
     limit = settings.get("initial_downloads", 3)
-
-    # Examine the newest few episodes.
     episodes = feed.entries[:limit]
-
     audio_directory = settings["audio_directory"]
     show_directory = os.path.join(audio_directory, show_id)
-
     os.makedirs(show_directory, exist_ok=True)
 
     new_count = 0
@@ -132,37 +177,33 @@ def update_show(conn, show_id, show, settings):
 
     for episode in episodes:
         guid = episode.get("id") or episode.get("guid")
-
         if not guid:
             print("      Skipping episode with no GUID.")
             continue
 
         existing = conn.execute(
-            "SELECT id, downloaded, filename FROM episodes WHERE guid = ?",
-            (guid,)
+            """
+            SELECT id, downloaded, filename, played, duration
+            FROM episodes
+            WHERE guid = ?
+            """,
+            (guid,),
         ).fetchone()
 
         if existing:
-            ep_id, downloaded, filepath = existing
+            ep_id, downloaded, filepath, played, duration = existing
 
-            # Already played — never redownload.
-            played = conn.execute(
-                "SELECT played FROM episodes WHERE id = ?",
-                (ep_id,)
-            ).fetchone()[0]
-
+            # A played episode stays in the database but is never redownloaded.
             if played:
                 continue
 
-            # Already downloaded — nothing to do.
-            if downloaded and os.path.exists(filepath):
+            # Already downloaded and still present.
+            if downloaded and filepath and os.path.exists(filepath):
                 continue
 
-            # Episode is in the database but wasn't successfully downloaded.
             print()
-            print(f"      RETRY: {episode.title}")
+            print(f"      RETRY: {episode.get('title', 'Untitled episode')}")
             audio_url = episode.enclosures[0].href if episode.enclosures else None
-
             if not audio_url:
                 print("      No audio URL available.")
                 continue
@@ -170,32 +211,33 @@ def update_show(conn, show_id, show, settings):
             success = download_episode(
                 audio_url,
                 filepath,
-                settings.get("download_timeout", 300)
+                settings.get("download_timeout", 300),
             )
 
             if success:
+                duration = get_audio_duration(filepath)
                 conn.execute(
-                    "UPDATE episodes SET downloaded = 1 WHERE id = ?",
-                    (ep_id,)
+                    """
+                    UPDATE episodes
+                    SET downloaded = 1, duration = ?
+                    WHERE id = ?
+                    """,
+                    (duration, ep_id),
                 )
                 conn.commit()
-
                 downloaded_count += 1
                 retry_count += 1
-
                 print(f"      SAVED: {filepath}")
-
             continue
 
         if not episode.enclosures:
-            print(f"      No audio: {episode.title}")
+            print(f"      No audio: {episode.get('title', 'Untitled episode')}")
             continue
 
         audio_url = episode.enclosures[0].href
         title = episode.get("title", "Untitled episode")
         published = episode.get("published", "")
-
-        filename = safe_filename(title) + ".mp3"
+        filename = make_filename(title, guid)
         filepath = os.path.join(show_directory, filename)
 
         print()
@@ -204,12 +246,13 @@ def update_show(conn, show_id, show, settings):
         success = download_episode(
             audio_url,
             filepath,
-            settings.get("download_timeout", 300)
+            settings.get("download_timeout", 300),
         )
-
+        duration = get_audio_duration(filepath) if success else None
         now = datetime.now().isoformat(timespec="seconds")
 
-        conn.execute("""
+        conn.execute(
+            """
             INSERT INTO episodes (
                 show_id,
                 show_name,
@@ -219,23 +262,25 @@ def update_show(conn, show_id, show, settings):
                 audio_url,
                 filename,
                 downloaded,
+                duration,
                 added_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
-            show_id,
-            show["name"],
-            guid,
-            title,
-            published,
-            audio_url,
-            filepath,
-            1 if success else 0,
-            now
-        ))
-
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                show_id,
+                show["name"],
+                guid,
+                title,
+                published,
+                audio_url,
+                filepath,
+                1 if success else 0,
+                duration,
+                now,
+            ),
+        )
         conn.commit()
-
         new_count += 1
 
         if success:
@@ -259,25 +304,23 @@ def main():
     print("        NPR PI LIBRARY UPDATER")
     print("========================================")
 
-    for show_id, show in config["shows"].items():
+    try:
+        for show_id, show in config["shows"].items():
+            if not show.get("enabled", False):
+                continue
+            if not show.get("feed"):
+                print(f"Skipping {show.get('name', show_id)}: no feed configured.")
+                continue
 
-        if not show.get("enabled", False):
-            continue
+            update_show(conn, show_id, show, config["settings"])
 
-        update_show(
-            conn,
-            show_id,
-            show,
-            config["settings"]
-        )
-
-    print()
-    print("========================================")
-    print("             UPDATE COMPLETE")
-    print("========================================")
-    print()
-
-    conn.close()
+        print()
+        print("========================================")
+        print("             UPDATE COMPLETE")
+        print("========================================")
+        print()
+    finally:
+        conn.close()
 
 
 if __name__ == "__main__":
