@@ -1,0 +1,7 @@
+npr.db
+audio/
+__pycache__/
+*.pyc
+*.part
+*.backup
+{SOCKET}
