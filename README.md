@@ -12,10 +12,10 @@ The NPR Podcatcher is a dedicated player appliance for listening to your favorit
 
 To fully update the system:
     
-    ```
+    
     sudo apt update
     sudo apt upgrade -y
-    ```
+    
     
 2. Essential system packages
 
@@ -63,6 +63,6 @@ alsa/plughw:MAX98357A
 ## Using the Podcatcher
 
 <!--stackedit_data:
-eyJoaXN0b3J5IjpbLTE5MDI0NzQ4MSwtMTc3OTM0OTY5OSwtNj
-M0MTEzMjVdfQ==
+eyJoaXN0b3J5IjpbMjAxNTQwNzQxMywtMTkwMjQ3NDgxLC0xNz
+c5MzQ5Njk5LC02MzQxMTMyNV19
 -->
