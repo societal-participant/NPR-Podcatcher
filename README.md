@@ -4,25 +4,21 @@ The NPR Podcatcher is a dedicated player appliance for listening to your favorit
 ## About the Podcatcher
 ### Hardware Requirements
 ### Software Requirements
+
 1. Base operating system
 
 -   **Raspberry Pi OS**
-    -   Debian-based
-    -   Our current Pi is running **64-bit ARM (`aarch64`)**
--   System fully updated:
+    -   Debian Trixie
+-   To fully update the dydtem:
     
     ```
     sudo apt update
     sudo apt upgrade -y
     ```
     
-
-### 2. Essential system packages
-
-These are the things I'd consider part of the basic software environment:
+2. Essential system packages
 
 -   Python 3
--   Python 3 `pip` if we end up needing third-party Python packages
 -   Git
 -   ALSA utilities
 -   mpv
@@ -34,7 +30,7 @@ A clean installation can start with:
 sudo apt install -y python3 python3-pip git alsa-utils mpv ffmpeg
 ```
 
-### 3. Audio system
+3. Audio system
 
 -   ALSA installed/configured
 -   MAX98357A ALSA device recognized
@@ -66,6 +62,6 @@ alsa/plughw:MAX98357A
 ## Using the Podcatcher
 
 <!--stackedit_data:
-eyJoaXN0b3J5IjpbNjU2OTExNDAyLC0xNzc5MzQ5Njk5LC02Mz
-QxMTMyNV19
+eyJoaXN0b3J5IjpbMTQyMjg4NjI2NywtMTc3OTM0OTY5OSwtNj
+M0MTEzMjVdfQ==
 -->
