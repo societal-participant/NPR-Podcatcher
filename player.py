@@ -13,6 +13,44 @@ DB = "/home/pi/npr/npr.db"
 
 SOCKET = "/tmp/npr-mpv.sock"
 
+BASE_DIR = os.path.expanduser("~/npr")
+
+CONFIG_FILE = os.path.join(BASE_DIR, "config.json")
+
+# Default audio shaping for small class-D speakers like the MAX98357A kit.
+# These tend to have a harsh, boxy resonance somewhere in the 2-6kHz range
+# and almost no body below ~300Hz, which can read as "tin can" - but
+# overcorrecting swings the other way into "muffled," and a boost anywhere
+# in the 200-500Hz "boxy/muddy" zone specifically hurts deep voices, since
+# that's where their fundamental and low harmonics live. This version:
+#
+#   highpass    - cuts rumble/handling noise below what the driver can
+#                 reproduce cleanly.
+#   bass        - low-shelf cut below ~200Hz for overall bass level. This
+#                 is a broad tone control (mirrors "treble" below) - use
+#                 it for "too much/little bass overall," separate from
+#                 the narrower boxy-resonance fix just below.
+#   equalizer 1 - cuts the 350Hz boxy/muddy zone specifically.
+#   equalizer 2 - small boost around 1.8kHz for consonant definition and
+#                 speech intelligibility, without touching the harsh zone.
+#   equalizer 3 - pulls down the main harsh resonant peak around 3kHz.
+#   treble      - a gentle high-shelf boost above ~7kHz for "air."
+#   acompressor - evens out loudness across quiet/loud speech.
+#   alimiter    - final safety ceiling so nothing clips.
+#
+# Override this per your actual hardware by setting "audio_filter" under
+# "settings" in config.json - no code changes needed to retune it.
+DEFAULT_AUDIO_FILTER = (
+    "highpass=f=130,"
+    "bass=g=-4:f=200:width_type=o:width=0.8,"
+    "equalizer=f=350:width_type=o:width=1.2:g=-3,"
+    "equalizer=f=1800:width_type=o:width=1.0:g=2,"
+    "equalizer=f=3000:width_type=o:width=1.0:g=-3,"
+    "treble=g=3:f=7000:width_type=o:width=0.7,"
+    "acompressor=threshold=0.12:ratio=3:attack=15:release=250:makeup=2,"
+    "alimiter=limit=0.95"
+)
+
 current_episode_id = None
 
 position_thread_running = False
@@ -21,6 +59,30 @@ position_thread_running = False
 # The currently-playing episode is NOT in this list; it lives in
 # current_episode_id.
 play_queue = []
+
+def load_audio_filter():
+    """Read a custom audio filter chain from config.json's
+    settings.audio_filter, if present; otherwise use the default tuned
+    for small class-D speaker kits. Never raises - falls back silently
+    on any config problem so a bad edit can't stop playback."""
+
+    try:
+
+        with open(CONFIG_FILE, "r") as f:
+
+            config = json.load(f)
+
+        custom = config.get("settings", {}).get("audio_filter")
+
+        if custom:
+
+            return custom
+
+    except (OSError, ValueError):
+
+        pass
+
+    return DEFAULT_AUDIO_FILTER
 
 def send_mpv(command):
 
@@ -114,6 +176,8 @@ def start_mpv():
 
     print("Starting mpv...")
 
+    audio_filter = load_audio_filter()
+
     process = subprocess.Popen(
 
         [
@@ -130,7 +194,7 @@ def start_mpv():
 
             "--volume=100",
 
-            "--af=lavfi=[acompressor=threshold=0.12:ratio=3:attack=20:release=250:makeup=2,alimiter=limit=0.99]",
+            f"--af=lavfi=[{audio_filter}]",
 
             f"--input-ipc-server={SOCKET}",
 
