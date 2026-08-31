@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 import socket
 import sqlite3
 import subprocess
@@ -15,6 +16,11 @@ SOCKET = "/tmp/npr-mpv.sock"
 current_episode_id = None
 
 position_thread_running = False
+
+# Remaining episode ids to auto-play after the current one finishes.
+# The currently-playing episode is NOT in this list; it lives in
+# current_episode_id.
+play_queue = []
 
 def send_mpv(command):
 
@@ -329,10 +335,26 @@ def position_monitor():
             if position is not None:
                 if duration and position >= duration - 5:
                     save_position(ep_id, 0, played=True)
+                    advance_queue()
                 else:
                     save_position(ep_id, position)
 
         time.sleep(5)
+
+def advance_queue():
+    """Called when the current track has just finished. Starts the next
+    queued episode, if any."""
+
+    global play_queue
+
+    if play_queue:
+
+        next_id = play_queue.pop(0)
+
+        print()
+        print(f"Queue: advancing to episode {next_id}...")
+
+        play(next_id)
 
 def start_position_monitor():
 
@@ -530,6 +552,58 @@ def play(ep_id):
 
         )
 
+def parse_episode_ids(args):
+    """Parse a play-command argument string into a list of episode ids.
+
+    Accepts individual ids, comma and/or whitespace separated, and ranges
+    written as "start-end" (inclusive, either direction). For example:
+    "13, 14, 15", "13 14 15", "10-15", and "10-12, 15" are all valid.
+    Raises ValueError on anything that doesn't parse.
+    """
+
+    parts = [p for p in re.split(r"[,\s]+", args) if p]
+
+    if not parts:
+        raise ValueError("no ids given")
+
+    ids = []
+
+    for part in parts:
+
+        match = re.match(r"^(\d+)-(\d+)$", part)
+
+        if match:
+
+            start, end = int(match.group(1)), int(match.group(2))
+
+            step = 1 if end >= start else -1
+
+            ids.extend(range(start, end + step, step))
+
+        else:
+
+            ids.append(int(part))
+
+    return ids
+
+def start_queue(ids):
+    """Play a list of episode ids back-to-back. The first plays immediately;
+    the rest are picked up automatically by the position monitor as each
+    track finishes."""
+
+    global play_queue
+
+    if not ids:
+        return
+
+    play_queue = list(ids[1:])
+
+    if len(ids) > 1:
+        print()
+        print(f"Queued: {', '.join(str(i) for i in ids[1:])}")
+
+    play(ids[0])
+
 def cleanup_played():
 
     conn = sqlite3.connect(DB)
@@ -651,7 +725,7 @@ def status():
 
 def stop():
 
-    global current_episode_id
+    global current_episode_id, play_queue
 
     if current_episode_id is not None:
 
@@ -670,6 +744,8 @@ def stop():
     send_mpv(["stop"])
 
     current_episode_id = None
+
+    play_queue = []
 
 def delete_episode(ep_id):
 
@@ -776,7 +852,9 @@ def main():
 
     print("  list")
 
-    print("  play <id>")
+    print("  play <id> [, <id> | <id>-<id> ...]")
+
+    print("  queue")
 
     print("  delete <id>")
 
@@ -840,25 +918,36 @@ def main():
 
             elif command.startswith("play "):
 
+                args = command[len("play "):].strip()
+
                 try:
 
-                    ep_id = int(
+                    ids = parse_episode_ids(args)
 
-                        command.split()[1]
+                except ValueError:
 
+                    print("Usage: play <id> [, <id> | <id>-<id> ...]")
+
+                else:
+
+                    start_queue(ids)
+
+            elif command == "queue":
+
+                print()
+
+                if play_queue:
+
+                    print(
+                        "Up next:",
+                        ", ".join(str(i) for i in play_queue),
                     )
 
-                    play(ep_id)
+                else:
 
-                except (
+                    print("Queue is empty.")
 
-                    ValueError,
-
-                    IndexError,
-
-                ):
-
-                    print("Usage: play <id>")
+                print()
 
             elif command == "pause":
 
