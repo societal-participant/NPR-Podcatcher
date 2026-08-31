@@ -9,7 +9,8 @@ The NPR Podcatcher is a dedicated player appliance for listening to your favorit
 
 -   **Raspberry Pi OS**
     -   Debian Trixie
--   To fully update the dydtem:
+
+To fully update the system:
     
     ```
     sudo apt update
@@ -24,7 +25,7 @@ The NPR Podcatcher is a dedicated player appliance for listening to your favorit
 -   mpv
 -   FFmpeg
 
-A clean installation can start with:
+Install these with:
 
 ```
 sudo apt install -y python3 python3-pip git alsa-utils mpv ffmpeg
@@ -41,7 +42,7 @@ sudo apt install -y python3 python3-pip git alsa-utils mpv ffmpeg
     ```
     
 
-We currently expect:
+The expected output:
 
 ```
 card 0: MAX98357A
@@ -62,6 +63,6 @@ alsa/plughw:MAX98357A
 ## Using the Podcatcher
 
 <!--stackedit_data:
-eyJoaXN0b3J5IjpbMTQyMjg4NjI2NywtMTc3OTM0OTY5OSwtNj
+eyJoaXN0b3J5IjpbLTE5MDI0NzQ4MSwtMTc3OTM0OTY5OSwtNj
 M0MTEzMjVdfQ==
 -->
