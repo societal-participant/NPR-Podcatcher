@@ -1,17 +1,11 @@
 #!/usr/bin/env python3
 
 import json
-
 import os
-
 import socket
-
 import sqlite3
-
 import subprocess
-
 import threading
-
 import time
 
 DB = "/home/pi/npr/npr.db"
@@ -129,6 +123,8 @@ def start_mpv():
             "--audio-device=alsa/plughw:MAX98357A",
 
             "--volume=100",
+
+            "--af=lavfi=[acompressor=threshold=0.12:ratio=3:attack=20:release=250:makeup=2,alimiter=limit=0.99]",
 
             f"--input-ipc-server={SOCKET}",
 
