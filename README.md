@@ -1,5 +1,5 @@
 # NPR Podcatcher
-The NPR Podcatcher is a dedicated player appliance for listening to your favorite NPR podcasts. The podcatcher downloads your specified NPR broadcasts to your Raspberry Pi Zero W, where you can listen to them. 
+The NPR Podcatcher is a dedicated player appliance for listening to your favorite podcasts from NPR (National Public Radio). The podcatcher downloads your specified NPR broadcasts to your Raspberry Pi Zero W, where you can listen to them. 
 
 ## About the Podcatcher
 ### Hardware Requirements
@@ -63,6 +63,6 @@ alsa/plughw:MAX98357A
 ## Using the Podcatcher
 
 <!--stackedit_data:
-eyJoaXN0b3J5IjpbMjAxNTQwNzQxMywtMTkwMjQ3NDgxLC0xNz
-c5MzQ5Njk5LC02MzQxMTMyNV19
+eyJoaXN0b3J5IjpbLTExNjMwMTY3NzgsMjAxNTQwNzQxMywtMT
+kwMjQ3NDgxLC0xNzc5MzQ5Njk5LC02MzQxMTMyNV19
 -->
